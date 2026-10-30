@@ -47,8 +47,9 @@ BAT
     sed -i 's/$/\r/' "$SNAPDIR/$SNAPIN_FILE"
     chmod 777 "$SNAPDIR/$SNAPIN_FILE"; chown fogproject:www-data "$SNAPDIR/$SNAPIN_FILE" 2>/dev/null
     HASH=$(sha512sum "$SNAPDIR/$SNAPIN_FILE" | cut -d' ' -f1 | tr a-z A-Z); SIZE=$(stat -c %s "$SNAPDIR/$SNAPIN_FILE")
-    q "INSERT INTO snapins (sName,sDesc,sFilePath,sArgs,sCreateDate,sCreator,sReboot,sShutdown,sRunWith,sRunWithArgs,snapinProtect,sEnabled,sReplicate,sHideLog,sTimeout,sPackType,sHash,sSize,sAnon3)
-       VALUES ('$SNAPIN_NAME','LOTUS8 one-shot: keep FOG client service healthy','$SNAPIN_FILE','',NOW(),'LOTUS8',0,0,'cmd.exe','/c',0,1,1,0,0,0,'$HASH',$SIZE,'')"
+    # INSERT IGNORE: columns I do not list (sReboot, sShutdown, ...) take FOG's own defaults, so enum/int type differences cannot break it
+    q "INSERT IGNORE INTO snapins (sName,sDesc,sFilePath,sArgs,sCreateDate,sCreator,sRunWith,sRunWithArgs,sEnabled,sReplicate,sHash,sSize)
+       VALUES ('$SNAPIN_NAME','LOTUS8 one-shot: keep FOG client service healthy','$SNAPIN_FILE','',NOW(),'LOTUS8','cmd.exe','/c','1','1','$HASH','$SIZE')" 2>/dev/null        || die "snapin INSERT failed (FOG schema differs). Nothing else changed."
     SID=$(q "SELECT sID FROM snapins WHERE sName='$SNAPIN_NAME' LIMIT 1")
     [ -n "$SID" ] || die "could not create snapin"
     # storage group association (table/column names discovered, not guessed)

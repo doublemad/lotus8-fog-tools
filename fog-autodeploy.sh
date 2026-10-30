@@ -92,6 +92,6 @@ if [ "$NATIVE" = "1" ]; then
         q "UPDATE globalSettings SET settingValue='${kv#*=}' WHERE settingKey='${kv%%=*}'"
     done
     echo; echo "Quick Registration auto mode set: AUTOPOP=$(setting FOG_QUICKREG_AUTOPOP) IMG_ID=$(setting FOG_QUICKREG_IMG_ID) IMG_WHEN_REG=$(setting FOG_QUICKREG_IMG_WHEN_REG)"
-    echo "Note: auto mode creates hosts and the deploy task, but does NOT fill the domain fields. Re-run this script after new hosts register, or ask for the optional trigger."
+    echo "Note: auto mode does not fill the domain fields. For future hosts install fog-ad-trigger.sh (fills the domain at creation), or re-run this script."
 fi
 echo; echo "Done. Deploy queued: $OKN, failed: $BAD. Hosts start when they PXE boot (wake-on-LAN was requested)."

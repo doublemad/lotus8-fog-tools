@@ -93,6 +93,17 @@ HOSTS=$(q "SELECT h.hostID, h.hostName FROM hosts h
   ORDER BY h.hostID")
 [ -n "$HOSTS" ] || { echo "  no new hosts (registered since $SINCE, inventory done, not tasked yet). Done."; exit 0; }
 echo "$HOSTS" | awk -F'\t' '{printf "  #%-5s %s\n",$1,$2}'
+# preflight: one harmless GET with the same headers, so a bad token is reported once with the facts instead of once per host
+FIRST=$(echo "$HOSTS" | head -1 | cut -f1)
+PC=$(curl -s -o /tmp/.fogq.$$ -w '%{http_code}' "http://127.0.0.1/fog/host/$FIRST" -H "fog-api-token: $GH" -H "fog-user-token: $UH")
+if [ "$PC" != "200" ]; then
+    echo "  [FAIL] API preflight returned HTTP $PC (200 expected). Facts:"
+    echo "    FOG_API_ENABLED=$(q "SELECT settingValue FROM globalSettings WHERE settingKey='FOG_API_ENABLED'")  global token length=${#GTOK}  user '$UNAME': $(q "SELECT CONCAT('uType=',uType,' uAllowAPI=',uAllowAPI,' tokenLen=',LENGTH(uAPIToken)) FROM users WHERE uName='$UNAME'")"
+    echo "    body: $(head -c 200 /tmp/.fogq.$$)"
+    echo "    403 = global/user token rejected or user is not admin (uType must be 0); 302/404 = API disabled or wrong webroot."
+    die "no tasks were created"
+fi
+echo "  API preflight OK"
 sleep 3
 OKN=0; BAD=0
 while IFS=$'\t' read -r id name; do

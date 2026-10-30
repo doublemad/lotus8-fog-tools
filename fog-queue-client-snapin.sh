@@ -79,6 +79,9 @@ if [ -z "$UTOK" ]; then UTOK=$(openssl rand -base64 24); q "UPDATE users SET uAP
 q "UPDATE users SET uAllowAPI=1 WHERE uName='$UNAME'"
 echo "  API enabled, user '$UNAME'"
 
+# FOG API expects both tokens base64-encoded in the headers
+GH=$(printf %s "$GTOK" | base64 -w0); UH=$(printf %s "$UTOK" | base64 -w0)
+
 # ---------- 3. tasks ----------
 step "3/3 Tasks for new hosts"
 TT=$(q "SELECT ttID FROM taskTypes WHERE ttName LIKE '%Single Snapin%' LIMIT 1"); TT=${TT:-13}
@@ -96,7 +99,7 @@ while IFS=$'\t' read -r id name; do
     [ -n "$id" ] || continue
     [ -n "$(q "SELECT 1 FROM snapinAssoc WHERE saHostID=$id AND saSnapinID=$SID LIMIT 1")" ] || q "INSERT INTO snapinAssoc (saHostID, saSnapinID) VALUES ($id, $SID)"
     code=$(curl -s -o /tmp/.fogq.$$ -w '%{http_code}' -X POST "http://127.0.0.1/fog/host/$id/task" \
-        -H 'Content-Type: application/json' -H "fog-api-token: $GTOK" -H "fog-user-token: $UTOK" \
+        -H 'Content-Type: application/json' -H "fog-api-token: $GH" -H "fog-user-token: $UH" \
         -d "{\"taskTypeID\":$TT,\"taskName\":\"$TASK_NAME\",\"deploySnapins\":$SID}")
     if [ "$code" = "200" ] || [ "$code" = "201" ]; then OKN=$((OKN+1)); echo "  [ OK ] $name"; else BAD=$((BAD+1)); echo "  [FAIL] $name http $code: $(head -c 200 /tmp/.fogq.$$)"; fi
 done <<< "$HOSTS"

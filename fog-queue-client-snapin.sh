@@ -76,7 +76,7 @@ if [ -z "$GTOK" ]; then GTOK=$(openssl rand -base64 24); q "UPDATE globalSetting
 UNAME=$(q "SELECT uName FROM users WHERE uName='fog' LIMIT 1"); UNAME=${UNAME:-$(q "SELECT uName FROM users ORDER BY uId LIMIT 1")}
 UTOK=$(q "SELECT uAPIToken FROM users WHERE uName='$UNAME'")
 if [ -z "$UTOK" ]; then UTOK=$(openssl rand -base64 24); q "UPDATE users SET uAPIToken='$UTOK' WHERE uName='$UNAME'"; echo "  user API token generated for '$UNAME'"; fi
-q "UPDATE users SET uAllowAPI=1 WHERE uName='$UNAME'"
+q "UPDATE users SET uAllowAPI='1' WHERE uName='$UNAME'"
 echo "  API enabled, user '$UNAME'"
 
 # FOG API expects both tokens base64-encoded in the headers

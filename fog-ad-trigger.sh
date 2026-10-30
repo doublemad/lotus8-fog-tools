@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# LOTUS8: every NEW host created in FOG automatically gets domain join (FOG's own Active Directory Defaults).
+# LOTUS8: every NEW host created in FOG automatically gets domain join (FOG's own Active Directory Defaults)
+# and 'enforce' (the client applies the rename/join even when a user is logged in, and reboots by itself).
 # Installs ONE database trigger on the FOG database. Run on the FOG server with sudo.
 #   install : sudo bash fog-ad-trigger.sh
 #   remove  : sudo REMOVE=1 bash fog-ad-trigger.sh
@@ -21,7 +22,7 @@ if [ "${REMOVE:-0}" = "1" ]; then
     echo "Trigger removed. New hosts no longer get the domain automatically."; exit 0
 fi
 
-for c in hostUseAD hostADDomain hostADOU hostADUser hostADPass hostADPassLegacy; do
+for c in hostUseAD hostADDomain hostADOU hostADUser hostADPass hostADPassLegacy hostEnforce; do
     "${DB[@]}" -e "SELECT $c FROM hosts LIMIT 1" >/dev/null 2>&1 || die "hosts.$c missing - FOG schema differs. Nothing changed."
 done
 DOM=$("${DB[@]}" -N -B -e "SELECT settingValue FROM globalSettings WHERE settingKey='FOG_AD_DEFAULT_DOMAINNAME'")
@@ -44,6 +45,7 @@ BEGIN
         SELECT IFNULL(MAX(settingValue),'') INTO d_usr FROM globalSettings WHERE settingKey='FOG_AD_DEFAULT_USER';
         IF d_dom <> '' AND d_usr <> '' THEN
             SET NEW.hostUseAD = '1';
+            SET NEW.hostEnforce = '1';
             SET NEW.hostADDomain = d_dom;
             SET NEW.hostADUser = d_usr;
             SET NEW.hostADOU = IFNULL((SELECT MAX(settingValue) FROM globalSettings WHERE settingKey='FOG_AD_DEFAULT_OU'),'');

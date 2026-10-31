@@ -18,7 +18,9 @@ if command -v mysql >/dev/null; then
         F=$(MYSQL_PWD="$(get snmysqlpass)" mysql -u"$(get snmysqluser)" -h"$(get snmysqlhost)" fog -N -B -e "SELECT settingValue FROM globalSettings WHERE settingKey='FOG_IPXE_BG_FILE' LIMIT 1" 2>/dev/null)
     fi
 fi
-[ -n "$F" ] || F=/var/www/fog/service/ipxe/bg.png
+[ -n "$F" ] || F=bg.png
+# FOG stores just a file name here; the picture is served from the iPXE service folder
+case "$F" in /*) ;; *) F="/var/www/fog/service/ipxe/$F" ;; esac
 [ -d "$(dirname "$F")" ] || die "folder of $F does not exist - is this the FOG server?"
 
 if [ "${REMOVE:-0}" = "1" ]; then

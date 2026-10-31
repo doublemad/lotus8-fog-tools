@@ -16,7 +16,7 @@ function Port($ip, $p) { try { (Test-NetConnection $ip -Port $p -WarningAction S
 function Srv()  { Get-Service FOGService -ErrorAction SilentlyContinue }
 function LogFile() { foreach ($f in 'C:\fog.log', 'C:\Program Files (x86)\FOG\fog.log', 'C:\Program Files\FOG\fog.log') { if (Test-Path $f) { return $f } } return $null }
 
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrator')) {
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host 'Запустите PowerShell от имени администратора.' -ForegroundColor Red; return
 }
 

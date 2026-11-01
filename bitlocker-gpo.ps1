@@ -5,7 +5,7 @@
 #  2) политика: XTS-AES 128, только занятое место, защита TPM без ПИН-кода (ПК грузится сам - работает с Wake-on-LAN и выключением в 21:00),
 #     ПК без TPM не шифруются, ключ восстановления ОБЯЗАТЕЛЬНО сохраняется в AD (если AD недоступен - шифрование не начинается)
 #  3) загрузочный скрипт на ПК создаёт задачу планировщика "LOTUS8 BitLocker" (от SYSTEM), задача включает шифрование диска C: (лог на ПК: C:\Windows\Temp\lotus8-bitlocker.log)
-# Параметры (необязательно, перед запуском): $env:ONLY='Ret4,PC8'  - только эти ПК (пилот);  $env:REMOVE=1 - убрать GPO (диски НЕ расшифровываются)
+# Параметры (необязательно, перед запуском): $env:ONLY='Ret4,PC8'  - только эти ПК (пилот);  $env:REMOVE=1 - отмена в 2 этапа (1: снять политику и убрать задачу на ПК, +$env:DECRYPT=1 расшифровать диски; 2 ($env:REMOVE=2): удалить GPO)
 # На ПК шифрование начнётся после применения политики и перезагрузки (gpupdate /force + перезагрузка; иногда нужно 2 перезагрузки).
 # ПК для снятия образа в FOG НЕ шифруйте: положите на ПК пустой файл C:\lotus8-bitlocker.skip (до первой перезагрузки с политикой).
 # весь код в дочернем блоке, чтобы $ErrorActionPreference и функции не оставались в сессии после irm | iex
@@ -25,10 +25,42 @@ $dn = $dom.DistinguishedName; $dns = $dom.DNSRoot
 $grp = Get-ADGroup -Identity "$($dom.DomainSID.Value)-515"          # Domain Computers (по SID, имя зависит от языка)
 $only = @(); if ($env:ONLY) { $only = $env:ONLY -split '[,; ]+' | Where-Object { $_ } }
 
+$fve = 'HKLM\SOFTWARE\Policies\Microsoft\FVE'
+if ($env:REMOVE -eq '2') {
+    Head 'Удаление GPO (этап 2)'
+    if (Get-GPO -Name $GpoName -ErrorAction SilentlyContinue) { Remove-GPO -Name $GpoName; Ok "GPO '$GpoName' удалён." } else { Warn "GPO '$GpoName' не найден" }
+    return
+}
 if ($env:REMOVE -eq '1') {
-    Head 'Удаление GPO'
-    if (Get-GPO -Name $GpoName -ErrorAction SilentlyContinue) { Remove-GPO -Name $GpoName; Ok "GPO '$GpoName' удалён. Уже зашифрованные диски остаются зашифрованными: на ПК 'manage-bde -off C:' расшифрует." }
-    else { Warn "GPO '$GpoName' не найден" }
+    Head 'Отмена BitLocker (этап 1): политика снимается, на ПК при загрузке убирается задача шифрования'
+    $g = Get-GPO -Name $GpoName -ErrorAction SilentlyContinue
+    if (-not $g) { Warn "GPO '$GpoName' не найден"; return }
+    $id = '{' + $g.Id.ToString().ToUpper() + '}'
+    $sys = "\$dns\SYSVOL\$dns\Policies\$id"; $sdir = "$sys\Machine\Scripts\Startup"
+    Remove-GPRegistryValue -Name $GpoName -Key $fve -ErrorAction SilentlyContinue
+    Ok 'Параметры BitLocker из GPO убраны'
+    Remove-Item "$sdir\lotus8-bitlocker-worker.ps1" -Force -ErrorAction SilentlyContinue
+    $lines = @(
+        '# LOTUS8: cleanup startup script (BitLocker cancelled): removes the scheduled task and worker from this PC.',
+        '$log = "$env:windir\Temp\lotus8-bitlocker.log"',
+        'function L($m) { Add-Content -Path $log -Value ("{0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date), $m) }',
+        'try {',
+        '    Unregister-ScheduledTask -TaskName ''LOTUS8 BitLocker'' -Confirm:$false -ErrorAction SilentlyContinue',
+        '    Remove-Item "$env:ProgramData\LOTUS8\bitlocker-worker.ps1" -Force -ErrorAction SilentlyContinue',
+        '    L ''BitLocker cancelled: scheduled task and worker removed''')
+    if ($env:DECRYPT -eq '1') { $lines += '    if ((Get-BitLockerVolume -MountPoint $env:SystemDrive).VolumeStatus -ne ''FullyDecrypted'') { L ((manage-bde -off $env:SystemDrive 2>&1 | Out-String).Trim()) }' }
+    $lines += '} catch { L "ERROR (cleanup): $($_.Exception.Message)" }'
+    [IO.File]::WriteAllText("$sdir\lotus8-bitlocker.ps1", ($lines -join "`r`n"), (New-Object Text.UTF8Encoding $true))
+    Ok 'Загрузочный скрипт заменён на очистку'
+    $o = Get-ADObject -Identity "CN=$id,CN=Policies,CN=System,$dn" -Properties versionNumber
+    $ver = [int]$o.versionNumber + 1
+    Set-ADObject -Identity $o.DistinguishedName -Replace @{ versionNumber = $ver }
+    [IO.File]::WriteAllText("$sys\GPT.INI", "[General]`r`nVersion=$ver`r`n", [Text.Encoding]::ASCII)
+    Write-Host ''
+    Write-Host 'Каждый ПК при ближайшей загрузке удалит у себя задачу шифрования (лог: C:\Windows\Temp\lotus8-bitlocker.log).' -ForegroundColor Green
+    if ($env:DECRYPT -eq '1') { Write-Host 'ПК с зашифрованным диском начнут РАСШИФРОВКУ (DECRYPT=1).' -ForegroundColor Yellow }
+    else { Write-Host 'Уже зашифрованные диски остаются зашифрованными. Чтобы расшифровать: перед запуском $env:DECRYPT=1 (или на ПК: manage-bde -off C:).' -ForegroundColor Yellow }
+    Write-Host 'Когда все ПК загрузятся хотя бы раз (обычно через несколько дней), запустите этот скрипт с $env:REMOVE=2: он удалит само GPO.' -ForegroundColor Gray
     return
 }
 
@@ -152,5 +184,5 @@ Write-Host ''
 Write-Host 'Дальше, на каждом ПК: gpupdate /force, затем перезагрузка (иногда две). Проверка:  manage-bde -status C:    лог: C:\Windows\Temp\lotus8-bitlocker.log' -ForegroundColor Green
 Write-Host 'Ключ восстановления ПК, на DC:' -ForegroundColor Cyan
 Write-Host '  Get-ADObject -SearchBase (Get-ADComputer ИМЯ_ПК).DistinguishedName -Filter ''objectClass -eq "msFVE-RecoveryInformation"'' -Properties msFVE-RecoveryPassword | select Name,msFVE-RecoveryPassword'
-Write-Host 'Откат: $env:REMOVE=1 перед запуском (расшифровка на ПК: manage-bde -off C:).' -ForegroundColor Gray
+Write-Host 'Отмена: $env:REMOVE=1 (этап 1), через несколько дней $env:REMOVE=2.' -ForegroundColor Gray
 }

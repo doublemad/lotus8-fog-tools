@@ -8,6 +8,8 @@
 # Параметры (необязательно, перед запуском): $env:ONLY='Ret4,PC8'  - только эти ПК (пилот);  $env:REMOVE=1 - убрать GPO (диски НЕ расшифровываются)
 # На ПК шифрование начнётся после применения политики и перезагрузки (gpupdate /force + перезагрузка; иногда нужно 2 перезагрузки).
 # ПК для снятия образа в FOG НЕ шифруйте: положите на ПК пустой файл C:\lotus8-bitlocker.skip (до первой перезагрузки с политикой).
+# весь код в дочернем блоке, чтобы $ErrorActionPreference и функции не оставались в сессии после irm | iex
+& {
 $GpoName = 'LOTUS8 BitLocker'
 $ErrorActionPreference = 'Stop'
 function Ok($t)   { Write-Host "  [ OK ] $t" -ForegroundColor Green }
@@ -151,3 +153,4 @@ Write-Host 'Дальше, на каждом ПК: gpupdate /force, затем п
 Write-Host 'Ключ восстановления ПК, на DC:' -ForegroundColor Cyan
 Write-Host '  Get-ADObject -SearchBase (Get-ADComputer ИМЯ_ПК).DistinguishedName -Filter ''objectClass -eq "msFVE-RecoveryInformation"'' -Properties msFVE-RecoveryPassword | select Name,msFVE-RecoveryPassword'
 Write-Host 'Откат: $env:REMOVE=1 перед запуском (расшифровка на ПК: manage-bde -off C:).' -ForegroundColor Gray
+}

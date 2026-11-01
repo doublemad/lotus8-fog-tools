@@ -3,6 +3,8 @@
 # Политика компьютера "Интерактивный вход: предел простоя компьютера" (InactivityTimeoutSecs). После блокировки вход только паролем доменной учётки.
 # Параметры (необязательно, перед запуском): $env:MINUTES=20 (по умолчанию 20);  $env:REMOVE=1 - убрать GPO
 # На ПК действует после gpupdate /force и перезагрузки.
+# весь код в дочернем блоке, чтобы $ErrorActionPreference и функции не оставались в сессии после irm | iex
+& {
 $GpoName = 'LOTUS8 Lock'
 $ErrorActionPreference = 'Stop'
 function Ok($t) { Write-Host "  [ OK ] $t" -ForegroundColor Green }
@@ -28,3 +30,4 @@ $v = (Get-GPRegistryValue -Name $GpoName -Key 'HKLM\SOFTWARE\Microsoft\Windows\C
 Ok "InactivityTimeoutSecs = $v сек ($($v / 60) мин)"
 Write-Host 'Дальше, на каждом ПК: gpupdate /force и перезагрузка. Проверка на ПК:  reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v InactivityTimeoutSecs' -ForegroundColor Green
 Write-Host 'Откат: $env:REMOVE=1 перед запуском.' -ForegroundColor Gray
+}

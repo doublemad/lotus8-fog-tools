@@ -6,6 +6,8 @@
 #   $env:ONLY='Ret4,PC8'   - только эти ПК (пилот)
 #   $env:MODE='write'      - запретить только ЗАПИСЬ на флешку (читать с неё можно); по умолчанию 'all' - запрет и чтения, и записи
 #   $env:REMOVE=1          - убрать GPO (и удалить группу-исключение, если она пустая)
+# весь код в дочернем блоке, чтобы $ErrorActionPreference и функции не оставались в сессии после irm | iex
+& {
 $GpoName = 'LOTUS8 USB'; $ExcGroup = 'LOTUS8-USB-Allowed'
 $ErrorActionPreference = 'Stop'
 function Ok($t)   { Write-Host "  [ OK ] $t" -ForegroundColor Green }
@@ -82,3 +84,4 @@ Write-Host "Проверка: значений в GPO: $((Get-GPRegistryValue -N
 Write-Host 'Дальше, на каждом ПК: gpupdate /force и перезагрузка (вставленную до этого флешку вынуть и вставить заново).' -ForegroundColor Green
 Write-Host "ПК, которому флешки нужны:  Add-ADGroupMember '$ExcGroup' -Members (Get-ADComputer ИМЯ_ПК)   (+ gpupdate /force и перезагрузка на нём)" -ForegroundColor Green
 Write-Host 'Откат: $env:REMOVE=1 перед запуском.' -ForegroundColor Gray
+}

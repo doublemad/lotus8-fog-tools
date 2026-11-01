@@ -50,11 +50,18 @@ if ($env:REMOVE -eq '1') {
         '    L ''BitLocker cancelled: scheduled task and worker removed''')
     if ($env:DECRYPT -eq '1') { $lines += '    if ((Get-BitLockerVolume -MountPoint $env:SystemDrive).VolumeStatus -ne ''FullyDecrypted'') { L ((manage-bde -off $env:SystemDrive 2>&1 | Out-String).Trim()) }' }
     $lines += '} catch { L "ERROR (cleanup): $($_.Exception.Message)" }'
+    # скрипт, scripts.ini и расширение Scripts записываются заново (независимо от того, что было в SYSVOL раньше)
+    New-Item -ItemType Directory -Force -Path $sdir | Out-Null
     [IO.File]::WriteAllText("$sdir\lotus8-bitlocker.ps1", ($lines -join "`r`n"), (New-Object Text.UTF8Encoding $true))
+    $ini = "[Startup]`r`n0CmdLine=powershell.exe`r`n0Parameters=-NoProfile -ExecutionPolicy Bypass -File `"$sdir\lotus8-bitlocker.ps1`"`r`n"
+    [IO.File]::WriteAllText("$sys\Machine\Scripts\scripts.ini", $ini, [Text.Encoding]::Unicode)
     Ok 'Загрузочный скрипт заменён на очистку'
-    $o = Get-ADObject -Identity "CN=$id,CN=Policies,CN=System,$dn" -Properties versionNumber
+    $ext = '[{42B5FAAE-6536-11D2-AE5A-0000F87571E3}{40B6664F-4972-11D1-A7CA-0000F87571E3}]'
+    $o = Get-ADObject -Identity "CN=$id,CN=Policies,CN=System,$dn" -Properties versionNumber, gPCMachineExtensionNames
+    $names = [string]$o.gPCMachineExtensionNames
+    if (-not $names.Contains($ext)) { $names += $ext }
     $ver = [int]$o.versionNumber + 1
-    Set-ADObject -Identity $o.DistinguishedName -Replace @{ versionNumber = $ver }
+    Set-ADObject -Identity $o.DistinguishedName -Replace @{ gPCMachineExtensionNames = $names; versionNumber = $ver }
     [IO.File]::WriteAllText("$sys\GPT.INI", "[General]`r`nVersion=$ver`r`n", [Text.Encoding]::ASCII)
     Write-Host ''
     Write-Host 'Каждый ПК при ближайшей загрузке удалит у себя задачу шифрования (лог: C:\Windows\Temp\lotus8-bitlocker.log).' -ForegroundColor Green

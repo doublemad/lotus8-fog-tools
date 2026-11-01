@@ -4,7 +4,7 @@
 #  1) создаёт GPO "LOTUS8 BitLocker" на весь домен (только "Domain Computers", контроллер домена не затрагивается)
 #  2) политика: XTS-AES 128, только занятое место, защита TPM без ПИН-кода (ПК грузится сам - работает с Wake-on-LAN и выключением в 21:00),
 #     ПК без TPM не шифруются, ключ восстановления ОБЯЗАТЕЛЬНО сохраняется в AD (если AD недоступен - шифрование не начинается)
-#  3) загрузочный скрипт на ПК включает шифрование диска C: (лог на ПК: C:\Windows\Temp\lotus8-bitlocker.log)
+#  3) загрузочный скрипт на ПК создаёт задачу планировщика "LOTUS8 BitLocker" (от SYSTEM), задача включает шифрование диска C: (лог на ПК: C:\Windows\Temp\lotus8-bitlocker.log)
 # Параметры (необязательно, перед запуском): $env:ONLY='Ret4,PC8'  - только эти ПК (пилот);  $env:REMOVE=1 - убрать GPO (диски НЕ расшифровываются)
 # На ПК шифрование начнётся после применения политики и перезагрузки (gpupdate /force + перезагрузка; иногда нужно 2 перезагрузки).
 # ПК для снятия образа в FOG НЕ шифруйте: положите на ПК пустой файл C:\lotus8-bitlocker.skip (до первой перезагрузки с политикой).
@@ -74,8 +74,9 @@ $id = '{' + $g.Id.ToString().ToUpper() + '}'
 $sys = "\\$dns\SYSVOL\$dns\Policies\$id"
 $sdir = "$sys\Machine\Scripts\Startup"
 New-Item -ItemType Directory -Force -Path $sdir | Out-Null
-$pc = @'
-# LOTUS8: enables BitLocker on C: (TPM protector + recovery password saved to AD). Runs at computer startup as SYSTEM.
+# 1) рабочий скрипт: включает BitLocker (запускается на ПК задачей планировщика от SYSTEM)
+$worker = @'
+# LOTUS8: enables BitLocker on C: (recovery password saved to AD first, then TPM protector). Runs as SYSTEM from the scheduled task "LOTUS8 BitLocker".
 $log = "$env:windir\Temp\lotus8-bitlocker.log"
 function L($m) { Add-Content -Path $log -Value ("{0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date), $m) }
 try {
@@ -93,9 +94,37 @@ try {
     }
     Backup-BitLockerKeyProtector -MountPoint $mp -KeyProtectorId $rp.KeyProtectorId -ErrorAction Stop | Out-Null
     L 'recovery password saved to AD'
-    Enable-BitLocker -MountPoint $mp -EncryptionMethod XtsAes128 -UsedSpaceOnly -TpmProtector -SkipHardwareTest -ErrorAction Stop | Out-Null
-    L 'BitLocker enabled (TPM protector, used space only); encryption runs in the background'
+    try {
+        Enable-BitLocker -MountPoint $mp -EncryptionMethod XtsAes128 -UsedSpaceOnly -TpmProtector -SkipHardwareTest -ErrorAction Stop | Out-Null
+        L 'BitLocker enabled (Enable-BitLocker, TPM protector, used space only); encryption runs in the background'
+    } catch {
+        L "Enable-BitLocker failed: $($_.Exception.Message); trying manage-bde"
+        L ((manage-bde -protectors -add $mp -TPM 2>&1 | Out-String).Trim())
+        L ((manage-bde -on $mp -UsedSpaceOnly -SkipHardwareTest 2>&1 | Out-String).Trim())
+        if ($LASTEXITCODE -ne 0) { throw "manage-bde -on failed with code $LASTEXITCODE" }
+        L 'BitLocker enabled (manage-bde, TPM protector, used space only)'
+    }
 } catch { L "ERROR: $($_.Exception.Message)" }
+'@
+[IO.File]::WriteAllText("$sdir\lotus8-bitlocker-worker.ps1", $worker, (New-Object Text.UTF8Encoding $true))
+
+# 2) загрузочный скрипт GPO: кладёт рабочий скрипт на ПК и создаёт/запускает задачу от SYSTEM (при каждой загрузке, +2 мин после старта)
+$pc = @'
+# LOTUS8: startup script (GPO). Installs the scheduled task "LOTUS8 BitLocker" (SYSTEM, highest privileges) and starts it.
+$log = "$env:windir\Temp\lotus8-bitlocker.log"
+function L($m) { Add-Content -Path $log -Value ("{0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date), $m) }
+try {
+    $d = "$env:ProgramData\LOTUS8"
+    New-Item -ItemType Directory -Force -Path $d | Out-Null
+    Copy-Item -Path "$PSScriptRoot\lotus8-bitlocker-worker.ps1" -Destination "$d\bitlocker-worker.ps1" -Force -ErrorAction Stop
+    $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$d\bitlocker-worker.ps1`""
+    $t = New-ScheduledTaskTrigger -AtStartup; $t.Delay = 'PT2M'
+    $p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+    Register-ScheduledTask -TaskName 'LOTUS8 BitLocker' -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null
+    Start-ScheduledTask -TaskName 'LOTUS8 BitLocker'
+    L 'scheduled task LOTUS8 BitLocker installed and started'
+} catch { L "ERROR (installer): $($_.Exception.Message)" }
 '@
 [IO.File]::WriteAllText("$sdir\lotus8-bitlocker.ps1", $pc, (New-Object Text.UTF8Encoding $true))
 $ini = "[Startup]`r`n0CmdLine=powershell.exe`r`n0Parameters=-NoProfile -ExecutionPolicy Bypass -File `"$sdir\lotus8-bitlocker.ps1`"`r`n"
@@ -114,7 +143,7 @@ Set-ADObject -Identity $o.DistinguishedName -Replace @{ gPCMachineExtensionNames
 Head '5. Проверка'
 $cnt = (Get-GPRegistryValue -Name $GpoName -Key $fve).Count
 Write-Host "  Параметров в политике: $cnt (ожидается $($vals.Count))"
-Write-Host "  Скрипт в SYSVOL:       $(Test-Path "$sdir\lotus8-bitlocker.ps1")   scripts.ini: $(Test-Path "$sys\Machine\Scripts\scripts.ini")"
+Write-Host "  Скрипты в SYSVOL:      $((Test-Path "$sdir\lotus8-bitlocker.ps1") -and (Test-Path "$sdir\lotus8-bitlocker-worker.ps1"))   scripts.ini: $(Test-Path "$sys\Machine\Scripts\scripts.ini")"
 Write-Host "  Расширение Scripts:    $(([string](Get-ADObject -Identity $o.DistinguishedName -Properties gPCMachineExtensionNames).gPCMachineExtensionNames).Contains($ext))   версия: $ver"
 Write-Host "  Привязка к домену:     $([bool]((Get-GPInheritance -Target $dn).GpoLinks | Where-Object DisplayName -eq $GpoName))"
 Write-Host ''

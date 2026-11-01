@@ -47,7 +47,9 @@ printf 'Type YES to apply: '
 read -r ANS < /dev/tty 2>/dev/null || die "no terminal for confirmation, nothing changed"
 [ "$ANS" = "YES" ] || die "cancelled, nothing changed"
 
-q "INSERT IGNORE INTO powerManagement (pmHostID,pmMin,pmHour,pmDom,pmMonth,pmDow,pmAction,pmOndemand)
+# idempotent: the table has no unique key, so drop identical rows first (a re-run must not double the schedule)
+q "DELETE FROM powerManagement WHERE pmAction='wol' AND pmOndemand='0' AND pmHour='$HOUR' AND pmMin='$MIN' AND pmDom='*' AND pmMonth='*' AND pmDow='$DOW' AND pmHostID IN (SELECT hostID FROM hosts WHERE $WHERE)"
+q "INSERT INTO powerManagement (pmHostID,pmMin,pmHour,pmDom,pmMonth,pmDow,pmAction,pmOndemand)
    SELECT hostID,'$MIN','$HOUR','*','*','$DOW','wol','0' FROM hosts WHERE $WHERE"
 
 "${DB[@]}" <<SQL || echo "WARN: trigger for new hosts could not be created (needs TRIGGER privilege). Existing hosts are done."
